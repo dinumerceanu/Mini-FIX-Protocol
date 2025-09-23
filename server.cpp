@@ -11,6 +11,8 @@
 #include <unordered_map>
 #include <arpa/inet.h>
 
+#include "include/thread_pool/thread_pool.h"
+
 constexpr int PORT = 8080;
 constexpr int MAX_EVENTS = 100;
 constexpr int BUFFER_SIZE = 1024;
@@ -68,6 +70,8 @@ int main() {
 
         std::unordered_map<int, Client> clients;
 
+        ThreadPool pool{10};
+
         while (true) {
             int nfds = epoll_wait(epollFd, events, MAX_EVENTS, -1);
 
@@ -121,30 +125,33 @@ int main() {
                             clients[fd].readBuffer += msg;
                             clients[fd].writeBuffer += msg;
 
-                            printf("Received from %s:%d (fd=%d): %s\n", clients[fd].ipStr.c_str(), clients[fd].port, fd, msg.c_str());
+                            pool.enqueue([=, &clients] {
+                                std::this_thread::sleep_for(std::chrono::seconds(2));
+                                printf("Received from %s:%d (fd=%d): %s\n", clients[fd].ipStr.c_str(), clients[fd].port, fd, msg.c_str());
 
-                            Client &client = clients[fd];
-                            while (!client.writeBuffer.empty()) {
-                                ssize_t sent = send(fd, client.writeBuffer.c_str(), client.writeBuffer.size(), 0);
-                                if (sent > 0) {
-                                    client.writeBuffer.erase(0, sent);
-                                    if (!client.writeBuffer.empty()) {
-                                        epoll_event modEv{};
-                                        modEv.events = EPOLLIN | EPOLLOUT | EPOLLRDHUP | EPOLLERR;
-                                        modEv.data.fd = fd;
-                                        epoll_ctl(epollFd, EPOLL_CTL_MOD, fd, &modEv);
-                                    }
-                                } else {
-                                    if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                                        break;
+                                Client &client = clients[fd];
+                                while (!client.writeBuffer.empty()) {
+                                    ssize_t sent = send(fd, client.writeBuffer.c_str(), client.writeBuffer.size(), 0);
+                                    if (sent > 0) {
+                                        client.writeBuffer.erase(0, sent);
+                                        if (!client.writeBuffer.empty()) {
+                                            epoll_event modEv{};
+                                            modEv.events = EPOLLIN | EPOLLOUT | EPOLLRDHUP | EPOLLERR;
+                                            modEv.data.fd = fd;
+                                            epoll_ctl(epollFd, EPOLL_CTL_MOD, fd, &modEv);
+                                        }
                                     } else {
-                                        epoll_ctl(epollFd, EPOLL_CTL_DEL, fd, nullptr);
-                                        close(fd);
-                                        clients.erase(fd);
-                                        break;
+                                        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                                            break;
+                                        } else {
+                                            epoll_ctl(epollFd, EPOLL_CTL_DEL, fd, nullptr);
+                                            close(fd);
+                                            clients.erase(fd);
+                                            break;
+                                        }
                                     }
                                 }
-                            }
+                            });
                         } else if (bytes == 0) {
                             epoll_ctl(epollFd, EPOLL_CTL_DEL, fd, nullptr);
                             close(fd);
