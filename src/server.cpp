@@ -10,8 +10,10 @@
 #include <vector>
 #include <unordered_map>
 #include <arpa/inet.h>
+#include <sstream>
 
-#include "include/thread_pool/thread_pool.h"
+#include "../include/thread_pool/thread_pool.h"
+#include "../include/parser/parser.h"
 
 constexpr int PORT = 8080;
 constexpr int MAX_EVENTS = 100;
@@ -123,11 +125,37 @@ int main() {
                         if (bytes > 0) {
                             std::string msg(buffer, bytes);
                             clients[fd].readBuffer += msg;
-                            clients[fd].writeBuffer += msg;
+                            // clients[fd].writeBuffer += msg;
 
                             pool.enqueue([=, &clients] {
-                                std::this_thread::sleep_for(std::chrono::seconds(2));
+                                // std::this_thread::sleep_for(std::chrono::seconds(2));
                                 printf("Received from %s:%d (fd=%d): %s\n", clients[fd].ipStr.c_str(), clients[fd].port, fd, msg.c_str());
+
+                                std::string fix_msg = msg;
+                                for (auto &ch : fix_msg) {
+                                    if (ch == '|') {
+                                        ch = '\x01';
+                                    }
+                                }
+
+                                std::ostringstream oss;
+
+                                auto data_opt = parse_fix_message(fix_msg);
+
+                                if (!data_opt) {
+                                    oss << "Invalid fix msg!\n";
+                                    // return 1;
+                                } else {
+                                    fix_data data = *data_opt;
+                                    for (auto key : data.keys) {
+                                        oss << key << " " << tag_names[key] << " " << data.fields[key] << std::endl;
+                                    }
+                                }
+
+                                std::string my_buff = oss.str();
+                                std::cout << my_buff << std::endl;
+
+                                clients[fd].writeBuffer += my_buff;
 
                                 Client &client = clients[fd];
                                 while (!client.writeBuffer.empty()) {

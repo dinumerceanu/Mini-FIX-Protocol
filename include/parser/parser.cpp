@@ -1,5 +1,25 @@
 #include "parser.h"
 
+std::unordered_map<int, std::string> tag_names = {
+    {8, "BeginString"},
+    {9, "BodyLength"},
+    {35, "MsgType"},
+    {49, "SenderCompID"},
+    {56, "TargetCompID"},
+    {34, "MsgSeqNum"},
+    {10, "CheckSum"},
+    {108, "HeartBtInt"},
+    // Orders Tags
+    {11, "ClOrdID"},        // Order ID
+    {21, "HandlInst"},      // HandlInst (e.g., automated)
+    {55, "Symbol"},         // Sticker
+    {54, "Side"},           // Buy/Sell
+    {38, "OrderQty"},       // Quantity
+    {40, "OrdType"},        // Order type: 1 = Market, 2 = Limit
+    {44, "Price"},          // Price (only for limit)
+    {59, "TimeInForce"}     // TIP: Day, GTC etc.
+};
+
 std::pair<int, std::string> parse_field(std::string &string_field) {
     size_t eq_pos = string_field.find('=');
 
@@ -134,46 +154,46 @@ std::optional<fix_data> parse_fix_message(std::string fixMsg) {
     return check_parsed_data(data);
 }
 
-int main() {
-    std::string fixLogon;
+// int main() {
+//     std::string fixLogon;
 
-    fixLogon += "8=FIX.4.4";       fixLogon += SOH; // BeginString
-    fixLogon += "9=65";            fixLogon += SOH; // BodyLength (dummy)
-    fixLogon += "35=A";            fixLogon += SOH; // MsgType = Logon
-    fixLogon += "34=1";            fixLogon += SOH; // MsgSeqNum
-    fixLogon += "49=CLIENT1";      fixLogon += SOH; // SenderCompID
-    fixLogon += "56=SERVER";       fixLogon += SOH; // TargetCompID
-    fixLogon += "108=30";          fixLogon += SOH; // HeartBtInt = 30 sec
-    fixLogon += "10=123";          fixLogon += SOH; // CheckSum (dummy)
+//     fixLogon += "8=FIX.4.4";       fixLogon += SOH; // BeginString
+//     fixLogon += "9=65";            fixLogon += SOH; // BodyLength (dummy)
+//     fixLogon += "35=A";            fixLogon += SOH; // MsgType = Logon
+//     fixLogon += "34=1";            fixLogon += SOH; // MsgSeqNum
+//     fixLogon += "49=CLIENT1";      fixLogon += SOH; // SenderCompID
+//     fixLogon += "56=SERVER";       fixLogon += SOH; // TargetCompID
+//     fixLogon += "108=30";          fixLogon += SOH; // HeartBtInt = 30 sec
+//     fixLogon += "10=123";          fixLogon += SOH; // CheckSum (dummy)
 
-    std::string fixNewOrder;
-    fixNewOrder += "8=FIX.4.4";        fixNewOrder += SOH; // BeginString
-    fixNewOrder += "9=112";            fixNewOrder += SOH; // BodyLength (dummy)
-    fixNewOrder += "35=D";              fixNewOrder += SOH; // MsgType = NewOrderSingle
-    fixNewOrder += "34=2";              fixNewOrder += SOH; // MsgSeqNum
-    fixNewOrder += "49=CLIENT1";        fixNewOrder += SOH; // SenderCompID
-    fixNewOrder += "56=SERVER";         fixNewOrder += SOH; // TargetCompID
-    fixNewOrder += "11=ORD12345";       fixNewOrder += SOH; // ClOrdID (Order ID)
-    fixNewOrder += "21=1";              fixNewOrder += SOH; // HandlInst (1=automated)
-    fixNewOrder += "55=NVDA";           fixNewOrder += SOH; // Symbol
-    fixNewOrder += "54=1";              fixNewOrder += SOH; // Side (1=Buy)
-    fixNewOrder += "38=100";            fixNewOrder += SOH; // OrderQty
-    fixNewOrder += "40=2";              fixNewOrder += SOH; // OrdType (2=Limit)
-    fixNewOrder += "44=500";            fixNewOrder += SOH; // Price (pentru limit)
-    fixNewOrder += "59=0";              fixNewOrder += SOH; // TimeInForce (0=Day)
-    fixNewOrder += "10=234";            fixNewOrder += SOH; // CheckSum (dummy)
+//     std::string fixNewOrder;
+//     fixNewOrder += "8=FIX.4.4";        fixNewOrder += SOH; // BeginString
+//     fixNewOrder += "9=112";            fixNewOrder += SOH; // BodyLength (dummy)
+//     fixNewOrder += "35=D";              fixNewOrder += SOH; // MsgType = NewOrderSingle
+//     fixNewOrder += "34=2";              fixNewOrder += SOH; // MsgSeqNum
+//     fixNewOrder += "49=CLIENT1";        fixNewOrder += SOH; // SenderCompID
+//     fixNewOrder += "56=SERVER";         fixNewOrder += SOH; // TargetCompID
+//     fixNewOrder += "11=ORD12345";       fixNewOrder += SOH; // ClOrdID (Order ID)
+//     fixNewOrder += "21=1";              fixNewOrder += SOH; // HandlInst (1=automated)
+//     fixNewOrder += "55=NVDA";           fixNewOrder += SOH; // Symbol
+//     fixNewOrder += "54=1";              fixNewOrder += SOH; // Side (1=Buy)
+//     fixNewOrder += "38=100";            fixNewOrder += SOH; // OrderQty
+//     fixNewOrder += "40=2";              fixNewOrder += SOH; // OrdType (2=Limit)
+//     fixNewOrder += "44=500";            fixNewOrder += SOH; // Price (pentru limit)
+//     fixNewOrder += "59=0";              fixNewOrder += SOH; // TimeInForce (0=Day)
+//     fixNewOrder += "10=234";            fixNewOrder += SOH; // CheckSum (dummy)
 
-    auto data_opt = parse_fix_message(fixNewOrder);
+//     auto data_opt = parse_fix_message(fixNewOrder);
 
-    if (!data_opt) {
-        std::cout << "Invalid fix msg!\n";
-        return 1;
-    }
+//     if (!data_opt) {
+//         std::cout << "Invalid fix msg!\n";
+//         return 1;
+//     }
 
-    fix_data data = *data_opt;
-    for (auto key : data.keys) {
-        std::cout << key << " " << tag_names[key] << " " << data.fields[key] << std::endl;
-    }
+//     fix_data data = *data_opt;
+//     for (auto key : data.keys) {
+//         std::cout << key << " " << tag_names[key] << " " << data.fields[key] << std::endl;
+//     }
 
-    return 0;
-}
+//     return 0;
+// }
