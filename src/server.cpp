@@ -11,6 +11,7 @@
 #include <unordered_map>
 #include <arpa/inet.h>
 #include <sstream>
+#include <chrono>
 
 #include "../include/thread_pool/thread_pool.h"
 #include "../include/parser/parser.h"
@@ -39,7 +40,57 @@ struct Client {
     uint16_t port;
     std::string readBuffer;
     std::string writeBuffer;
+    bool fix_conn_est;
+    std::chrono::steady_clock::time_point lastActivity;
 };
+
+ssize_t send_server_logon(Client &client) {
+    std::string sender_id_field = "49=";
+    sender_id_field += "127.0.0.1";
+    sender_id_field += ":";
+    sender_id_field += std::to_string(PORT);
+
+    std::string target_id_field = "56=";
+    target_id_field += client.ipStr;
+    target_id_field += ":";
+    target_id_field += std::to_string(client.port);
+
+    std::string fixLogon;
+
+    fixLogon += "8=FIX.4.4";            fixLogon += SOH; // BeginString
+    fixLogon += "9=65";                 fixLogon += SOH; // BodyLength (dummy)
+    fixLogon += "35=A";                 fixLogon += SOH; // MsgType = Logon
+    fixLogon += "34=1";                 fixLogon += SOH; // MsgSeqNum
+    fixLogon += sender_id_field;        fixLogon += SOH; // SenderCompID
+    fixLogon += target_id_field;        fixLogon += SOH; // TargetCompID
+    fixLogon += "108=30";               fixLogon += SOH; // HeartBtInt = 30 sec
+    fixLogon += "10=123";               fixLogon += SOH; // CheckSum (dummy)
+
+    return send(client.fd, fixLogon.c_str(), fixLogon.size(), 0);
+}
+
+ssize_t send_server_heartbeat(Client &client) {
+    std::string sender_id_field = "49=";
+    sender_id_field += "127.0.0.1";
+    sender_id_field += ":";
+    sender_id_field += std::to_string(PORT);
+
+    std::string target_id_field = "56=";
+    target_id_field += client.ipStr;
+    target_id_field += ":";
+    target_id_field += std::to_string(client.port);
+
+    std::string fixHeartbeat;
+    fixHeartbeat += "8=FIX.4.4"; fixHeartbeat += '\x01';
+    fixHeartbeat += "9=65";                 fixHeartbeat += SOH; // BodyLength (dummy)
+    fixHeartbeat += "35=0";      fixHeartbeat += '\x01'; // MsgType=Heartbeat
+    fixHeartbeat += "34=...";    fixHeartbeat += '\x01'; // MsgSeqNum
+    fixHeartbeat += sender_id_field; fixHeartbeat += '\x01';
+    fixHeartbeat += target_id_field; fixHeartbeat += '\x01';
+    fixHeartbeat += "10=123";    fixHeartbeat += '\x01'; // Checksum dummy
+
+    return send(client.fd, fixHeartbeat.c_str(), fixHeartbeat.size(), 0);
+}
 
 int main() {
     try {
@@ -73,6 +124,25 @@ int main() {
         std::unordered_map<int, Client> clients;
 
         ThreadPool pool{10};
+
+        pool.enqueue([=, &clients] {
+            while (true) {
+                auto now = std::chrono::steady_clock::now();
+
+                for (auto &[fd, client] : clients) {
+                    auto duration = std::chrono::duration_cast<std::chrono::seconds>(now - client.lastActivity);
+                    if (duration.count() >= 5) {
+                        // todo: send heartbeat
+
+                        send_server_heartbeat(client);
+
+                        client.lastActivity = now;
+                    }
+                }
+
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+            }
+        });
 
         while (true) {
             int nfds = epoll_wait(epollFd, events, MAX_EVENTS, -1);
@@ -113,7 +183,7 @@ int main() {
                         clientEvent.data.fd = clientSocket;
 
                         epoll_ctl(epollFd, EPOLL_CTL_ADD, clientSocket, &clientEvent);
-                        clients[clientSocket] = Client{clientSocket, ipStr, clientPort, "", ""};
+                        clients[clientSocket] = Client{clientSocket, ipStr, clientPort, "", "", false, std::chrono::steady_clock::time_point{}};
                     }
                     continue;
                 }
@@ -130,6 +200,8 @@ int main() {
                             pool.enqueue([=, &clients] {
                                 // std::this_thread::sleep_for(std::chrono::seconds(2));
                                 printf("Received from %s:%d (fd=%d): %s\n", clients[fd].ipStr.c_str(), clients[fd].port, fd, msg.c_str());
+
+                                clients[fd].lastActivity = std::chrono::steady_clock::now();
 
                                 std::string fix_msg = msg;
                                 for (auto &ch : fix_msg) {
@@ -155,28 +227,42 @@ int main() {
                                 std::string my_buff = oss.str();
                                 std::cout << my_buff << std::endl;
 
+
                                 Client &client = clients[fd];
-                                while (!client.writeBuffer.empty()) {
-                                    ssize_t sent = send(fd, client.writeBuffer.c_str(), client.writeBuffer.size(), 0);
-                                    if (sent > 0) {
-                                        client.writeBuffer.erase(0, sent);
-                                        if (!client.writeBuffer.empty()) {
-                                            epoll_event modEv{};
-                                            modEv.events = EPOLLIN | EPOLLOUT | EPOLLRDHUP | EPOLLERR;
-                                            modEv.data.fd = fd;
-                                            epoll_ctl(epollFd, EPOLL_CTL_MOD, fd, &modEv);
-                                        }
+                                fix_data data = *data_opt;
+                                if (data.fields[35] == "A") {
+                                    //received a logon
+                                    int rc = send_server_logon(client);
+                                    if (rc < 0) {
+                                        printf("FIX connection failed with %s:%d\nClosing connection with client...\n", client.ipStr.c_str(), client.port);
                                     } else {
-                                        if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                                            break;
-                                        } else {
-                                            epoll_ctl(epollFd, EPOLL_CTL_DEL, fd, nullptr);
-                                            close(fd);
-                                            clients.erase(fd);
-                                            break;
-                                        }
+                                        printf("FIX connection established with %s:%d\n", client.ipStr.c_str(), client.port);
+                                        client.fix_conn_est = true;
                                     }
                                 }
+
+                                // Client &client = clients[fd];
+                                // while (!client.writeBuffer.empty()) {
+                                //     ssize_t sent = send(fd, client.writeBuffer.c_str(), client.writeBuffer.size(), 0);
+                                //     if (sent > 0) {
+                                //         client.writeBuffer.erase(0, sent);
+                                //         if (!client.writeBuffer.empty()) {
+                                //             epoll_event modEv{};
+                                //             modEv.events = EPOLLIN | EPOLLOUT | EPOLLRDHUP | EPOLLERR;
+                                //             modEv.data.fd = fd;
+                                //             epoll_ctl(epollFd, EPOLL_CTL_MOD, fd, &modEv);
+                                //         }
+                                //     } else {
+                                //         if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                                //             break;
+                                //         } else {
+                                //             epoll_ctl(epollFd, EPOLL_CTL_DEL, fd, nullptr);
+                                //             close(fd);
+                                //             clients.erase(fd);
+                                //             break;
+                                //         }
+                                //     }
+                                // }
                             });
                         } else if (bytes == 0) {
                             epoll_ctl(epollFd, EPOLL_CTL_DEL, fd, nullptr);

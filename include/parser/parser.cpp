@@ -67,6 +67,8 @@ std::optional<fix_data> check_parsed_data(fix_data &data) {
                 return std::nullopt;
             }
         }
+    } else if (msgType == "0") {
+
     } else if (msgType == "D") {
         // NewOrderSingle
         std::vector<int> requiredFields = {11, 55, 54, 38, 40};
