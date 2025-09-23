@@ -125,7 +125,7 @@ int main() {
                         if (bytes > 0) {
                             std::string msg(buffer, bytes);
                             clients[fd].readBuffer += msg;
-                            // clients[fd].writeBuffer += msg;
+                            clients[fd].writeBuffer += msg;
 
                             pool.enqueue([=, &clients] {
                                 // std::this_thread::sleep_for(std::chrono::seconds(2));
@@ -154,8 +154,6 @@ int main() {
 
                                 std::string my_buff = oss.str();
                                 std::cout << my_buff << std::endl;
-
-                                clients[fd].writeBuffer += my_buff;
 
                                 Client &client = clients[fd];
                                 while (!client.writeBuffer.empty()) {
