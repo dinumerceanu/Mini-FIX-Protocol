@@ -83,7 +83,6 @@ std::string createExecutionReport(OrderExecutionInfo &info, Client &client) {
     fix << "31=" << (info.orderUnfilled ? "0" : std::to_string(info.lastPx)) << SOH;             // LastPx
     fix << "14=" << (info.orderUnfilled ? "0" : std::to_string(info.cumQty)) << SOH;             // CumQty
     fix << "151=" << (info.orderUnfilled ? "0" : std::to_string(info.leavesQty)) << SOH;         // LeavesQty
-
     fix << "10=000" << SOH;                         // CheckSum (dummy)
 
     return fix.str();

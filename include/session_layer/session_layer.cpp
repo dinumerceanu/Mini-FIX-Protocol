@@ -37,13 +37,13 @@ ssize_t send_server_heartbeat(Client &client) {
     target_id_field += std::to_string(client.port);
 
     std::string fixHeartbeat;
-    fixHeartbeat += "8=FIX.4.4"; fixHeartbeat += '\x01';
-    fixHeartbeat += "9=65";                 fixHeartbeat += SOH; // BodyLength (dummy)
-    fixHeartbeat += "35=0";      fixHeartbeat += '\x01'; // MsgType=Heartbeat
-    fixHeartbeat += "34=...";    fixHeartbeat += '\x01'; // MsgSeqNum
-    fixHeartbeat += sender_id_field; fixHeartbeat += '\x01';
-    fixHeartbeat += target_id_field; fixHeartbeat += '\x01';
-    fixHeartbeat += "10=123";    fixHeartbeat += '\x01'; // Checksum dummy
+    fixHeartbeat += "8=FIX.4.4";        fixHeartbeat += '\x01';
+    fixHeartbeat += "9=65";             fixHeartbeat += SOH; // BodyLength (dummy)
+    fixHeartbeat += "35=0";             fixHeartbeat += '\x01'; // MsgType=Heartbeat
+    fixHeartbeat += "34=...";           fixHeartbeat += '\x01'; // MsgSeqNum
+    fixHeartbeat += sender_id_field;    fixHeartbeat += '\x01';
+    fixHeartbeat += target_id_field;    fixHeartbeat += '\x01';
+    fixHeartbeat += "10=123";           fixHeartbeat += '\x01'; // Checksum dummy
 
     return send(client.fd, fixHeartbeat.c_str(), fixHeartbeat.size(), 0);
 }
@@ -111,13 +111,13 @@ ssize_t send_client_heartbeat(int clientSocket, sockaddr_in &clientAddress) {
     sender_id_field += std::to_string(port);
 
     std::string fixHeartbeat;
-    fixHeartbeat += "8=FIX.4.4"; fixHeartbeat += '\x01';
-    fixHeartbeat += "9=65";                 fixHeartbeat += SOH; // BodyLength (dummy)
-    fixHeartbeat += "35=0";      fixHeartbeat += '\x01'; // MsgType=Heartbeat
-    fixHeartbeat += "34=...";    fixHeartbeat += '\x01'; // MsgSeqNum
-    fixHeartbeat += sender_id_field; fixHeartbeat += '\x01';
-    fixHeartbeat += "56=SERVER"; fixHeartbeat += '\x01';
-    fixHeartbeat += "10=123";    fixHeartbeat += '\x01'; // Checksum dummy
+    fixHeartbeat += "8=FIX.4.4";        fixHeartbeat += '\x01';
+    fixHeartbeat += "9=65";             fixHeartbeat += SOH; // BodyLength (dummy)
+    fixHeartbeat += "35=0";             fixHeartbeat += '\x01'; // MsgType=Heartbeat
+    fixHeartbeat += "34=...";           fixHeartbeat += '\x01'; // MsgSeqNum
+    fixHeartbeat += sender_id_field;    fixHeartbeat += '\x01';
+    fixHeartbeat += "56=SERVER";        fixHeartbeat += '\x01';
+    fixHeartbeat += "10=123";           fixHeartbeat += '\x01'; // Checksum dummy
 
     return send(clientSocket, fixHeartbeat.c_str(), fixHeartbeat.size(), 0);
 }

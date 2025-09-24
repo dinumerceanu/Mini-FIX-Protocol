@@ -1,6 +1,7 @@
 #include "../headers.h"
 
 std::unordered_map<int, std::string> tag_names = {
+    // General tags
     {8, "BeginString"},
     {9, "BodyLength"},
     {35, "MsgType"},
@@ -24,11 +25,11 @@ std::unordered_map<int, std::string> tag_names = {
     {17, "ExecID"},         // Execution ID (unic per fill)
     {150, "ExecType"},      // 0=New, 1=Partial, 2=Filled, 4=Canceled etc.
     {39, "OrdStatus"},      // 0=New, 1=Partially filled, 2=Filled
-    {32, "LastShares"},     // Cantitate executată în fill-ul curent
-    {31, "LastPx"},         // Prețul fill-ului
-    {14, "CumQty"},         // Total executat până acum
-    {151, "LeavesQty"},     // Cantitate rămasă
-    {6, "AvgPx"}            // Preț mediu execuții
+    {32, "LastShares"},     // Current fill qty
+    {31, "LastPx"},         // Last price of a fill
+    {14, "CumQty"},         // Total filled
+    {151, "LeavesQty"},     // Qty left
+    {6, "AvgPx"}            // Avg Price
 };
 
 std::pair<int, std::string> parse_field(std::string &string_field) {
