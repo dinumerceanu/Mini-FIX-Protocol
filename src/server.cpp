@@ -304,6 +304,14 @@ int main() {
                                     printf("Connection terminated with %s:%d (fd=%d)\n", client.ipStr.c_str(), client.port, client.fd);
                                 }
 
+                                if (data.fields[35] == "0" && client.sent_test_req == true) {
+                                    client.sent_test_req = false;
+                                }
+
+                                if (data.fields[35] == "1") {
+                                    send_server_heartbeat(client);
+                                }
+
                                 // Client &client = clients[fd];
                                 // while (!client.writeBuffer.empty()) {
                                 //     ssize_t sent = send(fd, client.writeBuffer.c_str(), client.writeBuffer.size(), 0);
@@ -351,6 +359,7 @@ int main() {
                         ssize_t sent = send(fd, client.writeBuffer.c_str(), client.writeBuffer.size(), 0);
                         if (sent > 0) {
                             client.writeBuffer.erase(0, sent);
+                            client.lastActivityFromServer = std::chrono::steady_clock::now();
                         } else {
                             if (errno == EAGAIN || errno == EWOULDBLOCK) break;
                             else {
