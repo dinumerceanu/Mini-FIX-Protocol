@@ -1,221 +1,4 @@
-#include <iostream>
-#include <stdexcept>
-#include <cerrno>
-#include <cstring>
-#include <unistd.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <sys/epoll.h>
-#include <fcntl.h>
-#include <vector>
-#include <unordered_map>
-#include <arpa/inet.h>
-#include <chrono>
-
-#include "../include/thread_pool/thread_pool.h"
-#include "../include/parser/parser.h"
-
-constexpr int PORT = 9090;
-constexpr int PORT_OB = 8080;
-constexpr int MAX_EVENTS = 100;
-constexpr int BUFFER_SIZE = 1024;
-
-struct OrderExecutionInfo {
-    std::string clOrdID;
-    int cumQty;
-    int leavesQty;
-    int lastShares;
-    double lastPx;
-    bool isFilled;
-    bool orderUnfilled;
-};
-
-OrderExecutionInfo newOrderExecInfo(std::string clOrdID, int orderSize) {
-    return OrderExecutionInfo {
-        clOrdID,
-        0,
-        orderSize,
-        0,
-        0,
-        false,
-        false,
-    };
-}
-
-void parse_orderbook_msg(OrderExecutionInfo &info_in, std::string& msg) {
-    std::istringstream iss(msg);
-    std::string tmp;
-    std::string type;
-
-    iss >> tmp;
-    iss >> tmp;
-    iss >> type;
-
-    char bracket, slash, bracketClose;
-    int filled, total;
-    iss >> bracket >> filled >> slash >> total >> bracketClose;
-
-    iss >> tmp;
-    iss >> info_in.lastPx;
-
-    if (type == "filled") {
-        info_in.lastShares = filled;
-        info_in.cumQty = info_in.cumQty + filled;
-        info_in.leavesQty = total - info_in.cumQty;
-        info_in.isFilled = (info_in.leavesQty == 0);
-    } else {
-        info_in.orderUnfilled = true;
-    }
-}
-
-void printOrdExecInfo(OrderExecutionInfo &info) {
-    printf("%s cumQty: %d, leavesQty: %d, lastShares: %d, lastPrice: %f, filled: %d, order_unfilled: %d\n", info.clOrdID.c_str(), info.cumQty, info.leavesQty, info.lastShares, info.lastPx, info.isFilled, info.orderUnfilled);
-}
-
-std::string generateOrderID() {
-    auto now = std::chrono::system_clock::now();
-    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
-    return "ORD" + std::to_string(ms);
-}
-
-std::string getIdFromResp(const std::string &s) {
-    std::istringstream iss(s);
-    std::string first, second;
-    iss >> first >> second;
-    return second;
-}
-
-void check(int rc, const char* msg) {
-    if (rc < 0) {
-        throw std::runtime_error(std::string(msg) + ": " + strerror(errno));
-    }
-}
-
-void make_nonblocking(int fd) {
-    int flags = fcntl(fd, F_GETFL, 0);
-    if (flags == -1) throw std::runtime_error("fcntl(F_GETFL) failed");
-    if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1) {
-        throw std::runtime_error("fcntl(F_SETFL) failed");
-    }
-}
-
-struct Client {
-    int fd;
-    std::string ipStr;
-    uint16_t port;
-    std::string readBuffer;
-    std::string writeBuffer;
-    bool fix_conn_est;
-    std::chrono::steady_clock::time_point lastActivityFromClient;
-    std::chrono::steady_clock::time_point lastActivityFromServer;
-    bool sent_test_req;
-};
-
-std::string createExecutionReport(const OrderExecutionInfo &info, Client &client) {
-    std::string sender_id_field = "49=";
-    sender_id_field += "127.0.0.1";
-    sender_id_field += ":";
-    sender_id_field += std::to_string(PORT);
-
-    std::string target_id_field = "56=";
-    target_id_field += client.ipStr;
-    target_id_field += ":";
-    target_id_field += std::to_string(client.port);
-    
-    std::ostringstream fix;
-
-    fix << "8=FIX.4.4" << SOH;                       // BeginString
-    fix << "9=0" << SOH;                             // BodyLength (dummy)
-    fix << "35=8" << SOH;                            // MsgType = ExecutionReport
-    fix << "34=..." << SOH;                          // MsgSeqNum
-    fix << "49=" << sender_id_field << SOH;                   // SenderCompID
-    fix << "56=" << target_id_field << SOH;                   // TargetCompID
-    fix << "11=" << info.clOrdID << SOH;            // ClOrdID
-    fix << "17=" << info.clOrdID << SOH;            // ExecID
-    fix << "150=0" << SOH;                           // ExecType: 0 = New / 1 = Partial Fill / 2 = Fill (poți adapta)
-    fix << "39=" << (info.orderUnfilled ? "0" : (info.isFilled ? "2" : "1")) << SOH; // OrdStatus: 1 = Partially filled, 2 = Filled
-    fix << "38=" << (info.cumQty + info.leavesQty) << SOH; // OrderQty
-    fix << "32=" << (info.orderUnfilled ? "0" : std::to_string(info.lastShares)) << SOH;         // LastShares
-    fix << "31=" << (info.orderUnfilled ? "0" : std::to_string(info.lastPx)) << SOH;             // LastPx
-    fix << "14=" << (info.orderUnfilled ? "0" : std::to_string(info.cumQty)) << SOH;             // CumQty
-    fix << "151=" << (info.orderUnfilled ? "0" : std::to_string(info.leavesQty)) << SOH;         // LeavesQty
-
-    fix << "10=000" << SOH;                         // CheckSum (dummy)
-
-    return fix.str();
-}
-
-ssize_t send_server_logon(Client &client) {
-    std::string sender_id_field = "49=";
-    sender_id_field += "127.0.0.1";
-    sender_id_field += ":";
-    sender_id_field += std::to_string(PORT);
-
-    std::string target_id_field = "56=";
-    target_id_field += client.ipStr;
-    target_id_field += ":";
-    target_id_field += std::to_string(client.port);
-
-    std::string fixLogon;
-
-    fixLogon += "8=FIX.4.4";            fixLogon += SOH; // BeginString
-    fixLogon += "9=65";                 fixLogon += SOH; // BodyLength (dummy)
-    fixLogon += "35=A";                 fixLogon += SOH; // MsgType = Logon
-    fixLogon += "34=1";                 fixLogon += SOH; // MsgSeqNum
-    fixLogon += sender_id_field;        fixLogon += SOH; // SenderCompID
-    fixLogon += target_id_field;        fixLogon += SOH; // TargetCompID
-    fixLogon += "108=30";               fixLogon += SOH; // HeartBtInt = 30 sec
-    fixLogon += "10=123";               fixLogon += SOH; // CheckSum (dummy)
-
-    return send(client.fd, fixLogon.c_str(), fixLogon.size(), 0);
-}
-
-ssize_t send_server_heartbeat(Client &client) {
-    std::string sender_id_field = "49=";
-    sender_id_field += "127.0.0.1";
-    sender_id_field += ":";
-    sender_id_field += std::to_string(PORT);
-
-    std::string target_id_field = "56=";
-    target_id_field += client.ipStr;
-    target_id_field += ":";
-    target_id_field += std::to_string(client.port);
-
-    std::string fixHeartbeat;
-    fixHeartbeat += "8=FIX.4.4"; fixHeartbeat += '\x01';
-    fixHeartbeat += "9=65";                 fixHeartbeat += SOH; // BodyLength (dummy)
-    fixHeartbeat += "35=0";      fixHeartbeat += '\x01'; // MsgType=Heartbeat
-    fixHeartbeat += "34=...";    fixHeartbeat += '\x01'; // MsgSeqNum
-    fixHeartbeat += sender_id_field; fixHeartbeat += '\x01';
-    fixHeartbeat += target_id_field; fixHeartbeat += '\x01';
-    fixHeartbeat += "10=123";    fixHeartbeat += '\x01'; // Checksum dummy
-
-    return send(client.fd, fixHeartbeat.c_str(), fixHeartbeat.size(), 0);
-}
-
-ssize_t send_server_test_req(Client &client) {
-    std::string sender_id_field = "49=";
-    sender_id_field += "127.0.0.1";
-    sender_id_field += ":";
-    sender_id_field += std::to_string(PORT);
-
-    std::string target_id_field = "56=";
-    target_id_field += client.ipStr;
-    target_id_field += ":";
-    target_id_field += std::to_string(client.port);
-
-    std::string fixTestRequest;
-    fixTestRequest += "8=FIX.4.4";  fixTestRequest += '\x01';   // BeginString
-    fixTestRequest += "9=65";       fixTestRequest += '\x01';   // BodyLength (dummy)
-    fixTestRequest += "35=1";       fixTestRequest += '\x01';   // MsgType = TestRequest
-    fixTestRequest += "34=...";     fixTestRequest += '\x01';   // MsgSeqNum
-    fixTestRequest += sender_id_field; fixTestRequest += '\x01'; // SenderCompID
-    fixTestRequest += target_id_field; fixTestRequest += '\x01'; // TargetCompID
-    fixTestRequest += "112=TEST1";  fixTestRequest += '\x01';   // TestReqID
-    fixTestRequest += "10=123";     fixTestRequest += '\x01';   // CheckSum (dummy)
-
-    return send(client.fd, fixTestRequest.c_str(), fixTestRequest.size(), 0);
-}
+#include "../include/headers.h"
 
 int main() {
     try {
@@ -274,51 +57,51 @@ int main() {
 
         ThreadPool pool{10};
 
-        // pool.enqueue([=, &clients] {
-        //     while (true) {
-        //         auto now = std::chrono::steady_clock::now();
+        pool.enqueue([=, &clients] {
+            while (true) {
+                auto now = std::chrono::steady_clock::now();
 
-        //         for (auto &[fd, client] : clients) {
-        //             auto duration = std::chrono::duration_cast<std::chrono::seconds>(now - client.lastActivityFromServer);
-        //             if (duration.count() >= 5) {
-        //                 send_server_heartbeat(client);
-        //                 client.lastActivityFromServer = now;
-        //             }
-        //         }
+                for (auto &[fd, client] : clients) {
+                    auto duration = std::chrono::duration_cast<std::chrono::seconds>(now - client.lastActivityFromServer);
+                    if (duration.count() >= 7) {
+                        send_server_heartbeat(client);
+                        client.lastActivityFromServer = now;
+                    }
+                }
 
-        //         std::this_thread::sleep_for(std::chrono::seconds(2));
-        //     }
-        // });
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+            }
+        });
 
-        // pool.enqueue([=, &clients] {
-        //     while (true) {
-        //         std::vector<int> to_remove;
+        pool.enqueue([=, &clients] {
+            while (true) {
+                std::vector<int> to_remove;
 
-        //         auto now = std::chrono::steady_clock::now();
+                auto now = std::chrono::steady_clock::now();
 
-        //         for (auto &[fd, client] : clients) {
-        //             auto duration = std::chrono::duration_cast<std::chrono::seconds>(now - client.lastActivityFromClient);
-        //             if (duration.count() >= 10 && client.sent_test_req == false) {
-        //                 send_server_test_req(client);
-        //                 client.lastActivityFromServer = now;
-        //                 client.sent_test_req = true;
-        //             } else if (duration.count() >= 10 && client.sent_test_req == true) {
-        //                 client.fix_conn_est = false;
-        //                 client.lastActivityFromClient = std::chrono::steady_clock::now();
-        //                 epoll_ctl(epollFd, EPOLL_CTL_DEL, client.fd, nullptr);
-        //                 close(client.fd);
-        //                 printf("Connection terminated with %s:%d (fd=%d) because no response\n", client.ipStr.c_str(), client.port, client.fd);
-        //                 to_remove.push_back(client.fd);
-        //             }
-        //         }
+                for (auto &[fd, client] : clients) {
+                    auto duration = std::chrono::duration_cast<std::chrono::seconds>(now - client.lastActivityFromClient);
+                    if (duration.count() >= 7 && client.sent_test_req == false) {
+                        send_server_test_req(client);
+                        client.lastActivityFromServer = now;
+                        client.sent_test_req = true;
+                    } else if (duration.count() >= 7 && client.sent_test_req == true) {
+                        client.fix_conn_est = false;
+                        client.lastActivityFromClient = std::chrono::steady_clock::now();
+                        epoll_ctl(epollFd, EPOLL_CTL_DEL, client.fd, nullptr);
+                        close(client.fd);
+                        printf("Connection terminated with %s:%d (fd=%d) because no response\n", client.ipStr.c_str(), client.port, client.fd);
+                        to_remove.push_back(client.fd);
+                    }
+                }
                 
-        //         for (int fd : to_remove) {
-        //             clients.erase(fd);
-        //         }
+                for (int fd : to_remove) {
+                    clients.erase(fd);
+                }
                 
-        //         std::this_thread::sleep_for(std::chrono::seconds(3));
-        //     }
-        // });
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+            }
+        });
 
         while (true) {
             int nfds = epoll_wait(epollFd, events, MAX_EVENTS, -1);
@@ -511,7 +294,7 @@ int main() {
 
                 if (evFlags & EPOLLOUT) {
                     if (fd == orderbookSocket) {
-                        printf("\n\nWTF\n\n");
+
                     } else {    
                         Client &client = clients[fd];
                         while (!client.writeBuffer.empty()) {

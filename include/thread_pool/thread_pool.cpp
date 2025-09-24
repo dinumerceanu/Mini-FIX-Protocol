@@ -1,4 +1,4 @@
-#include "thread_pool.h"
+#include "../headers.h"
 
 ThreadPool::ThreadPool(std::size_t numThreads) {
     start(numThreads);

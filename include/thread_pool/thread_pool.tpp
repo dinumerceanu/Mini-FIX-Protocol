@@ -1,4 +1,4 @@
-#include "thread_pool.h"
+#include "../headers.h"
 
 template<class T>
 auto ThreadPool::enqueue(T task) -> std::future<decltype(task())> {

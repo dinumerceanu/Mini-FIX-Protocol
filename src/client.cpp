@@ -1,110 +1,4 @@
-#include <iostream>
-#include <stdexcept>
-#include <cerrno>
-#include <cstring>
-#include <unistd.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <sys/epoll.h>
-#include <fcntl.h>
-#include <vector>
-#include <unordered_map>
-#include <arpa/inet.h>
-#include <chrono>
-
-#include "../include/parser/parser.h"
-#include "../include/thread_pool/thread_pool.h"
-
-constexpr int PORT = 9090;
-
-void check(int rc, const char* msg) {
-    if (rc < 0) {
-        throw std::runtime_error(std::string(msg) + ": " + strerror(errno));
-    }
-}
-
-void make_nonblocking(int fd) {
-    int flags = fcntl(fd, F_GETFL, 0);
-    if (flags == -1) throw std::runtime_error("fcntl(F_GETFL) failed");
-    if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1) {
-        throw std::runtime_error("fcntl(F_SETFL) failed");
-    }
-}
-
-void send_client_logon(int clientSocket, sockaddr_in &clientAddress) {
-    socklen_t clientAddressSize = sizeof(clientAddress);
-    getsockname(clientSocket, (struct sockaddr*)&clientAddress, &clientAddressSize);
-    char ip[INET_ADDRSTRLEN];
-    inet_ntop(AF_INET, &clientAddress.sin_addr, ip, sizeof(ip));
-    int port = ntohs(clientAddress.sin_port);
-
-    std::string sender_id_field = "49=";
-    sender_id_field += ip;
-    sender_id_field += ":";
-    sender_id_field += std::to_string(port);
-
-    std::string fixLogon;
-
-    fixLogon += "8=FIX.4.4";            fixLogon += SOH; // BeginString
-    fixLogon += "9=65";                 fixLogon += SOH; // BodyLength (dummy)
-    fixLogon += "35=A";                 fixLogon += SOH; // MsgType = Logon
-    fixLogon += "34=1";                 fixLogon += SOH; // MsgSeqNum
-    fixLogon += sender_id_field;        fixLogon += SOH; // SenderCompID
-    fixLogon += "56=SERVER";            fixLogon += SOH; // TargetCompID
-    fixLogon += "108=30";               fixLogon += SOH; // HeartBtInt = 30 sec
-    fixLogon += "10=123";               fixLogon += SOH; // CheckSum (dummy)
-
-    send(clientSocket, fixLogon.c_str(), fixLogon.size(), 0);
-}
-
-ssize_t send_client_heartbeat(int clientSocket, sockaddr_in &clientAddress) {
-    socklen_t clientAddressSize = sizeof(clientAddress);
-    getsockname(clientSocket, (struct sockaddr*)&clientAddress, &clientAddressSize);
-    char ip[INET_ADDRSTRLEN];
-    inet_ntop(AF_INET, &clientAddress.sin_addr, ip, sizeof(ip));
-    int port = ntohs(clientAddress.sin_port);
-
-    std::string sender_id_field = "49=";
-    sender_id_field += ip;
-    sender_id_field += ":";
-    sender_id_field += std::to_string(port);
-
-    std::string fixHeartbeat;
-    fixHeartbeat += "8=FIX.4.4"; fixHeartbeat += '\x01';
-    fixHeartbeat += "9=65";                 fixHeartbeat += SOH; // BodyLength (dummy)
-    fixHeartbeat += "35=0";      fixHeartbeat += '\x01'; // MsgType=Heartbeat
-    fixHeartbeat += "34=...";    fixHeartbeat += '\x01'; // MsgSeqNum
-    fixHeartbeat += sender_id_field; fixHeartbeat += '\x01';
-    fixHeartbeat += "56=SERVER"; fixHeartbeat += '\x01';
-    fixHeartbeat += "10=123";    fixHeartbeat += '\x01'; // Checksum dummy
-
-    return send(clientSocket, fixHeartbeat.c_str(), fixHeartbeat.size(), 0);
-}
-
-ssize_t send_client_test_req(int clientSocket, sockaddr_in &clientAddress) {
-    socklen_t clientAddressSize = sizeof(clientAddress);
-    getsockname(clientSocket, (struct sockaddr*)&clientAddress, &clientAddressSize);
-    char ip[INET_ADDRSTRLEN];
-    inet_ntop(AF_INET, &clientAddress.sin_addr, ip, sizeof(ip));
-    int port = ntohs(clientAddress.sin_port);
-
-    std::string sender_id_field = "49=";
-    sender_id_field += ip;
-    sender_id_field += ":";
-    sender_id_field += std::to_string(port);
-
-    std::string fixTestRequest;
-    fixTestRequest += "8=FIX.4.4";  fixTestRequest += '\x01';   // BeginString
-    fixTestRequest += "9=65";       fixTestRequest += '\x01';   // BodyLength (dummy)
-    fixTestRequest += "35=1";       fixTestRequest += '\x01';   // MsgType = TestRequest
-    fixTestRequest += "34=...";     fixTestRequest += '\x01';   // MsgSeqNum (incrementat de tine)
-    fixTestRequest += sender_id_field; fixTestRequest += '\x01'; // SenderCompID
-    fixTestRequest += "56=SERVER"; fixTestRequest += '\x01'; // TargetCompID
-    fixTestRequest += "112=TEST1";  fixTestRequest += '\x01';   // TestReqID (orice string unic)
-    fixTestRequest += "10=123";     fixTestRequest += '\x01';   // CheckSum (dummy)
-
-    return send(clientSocket, fixTestRequest.c_str(), fixTestRequest.size(), 0);
-}
+#include "../include/headers.h"
 
 int main() {
     int clientSocket = socket(AF_INET, SOCK_STREAM, 0);
@@ -143,38 +37,38 @@ int main() {
 
     ThreadPool pool{2};
 
-    // pool.enqueue([&] {
-    //     while (true) {
-    //         std::this_thread::sleep_for(std::chrono::seconds(2));
+    pool.enqueue([&] {
+        while (true) {
+            std::this_thread::sleep_for(std::chrono::seconds(1));
 
-    //         auto now = std::chrono::steady_clock::now();
-    //         auto duration = std::chrono::duration_cast<std::chrono::seconds>(now - lastActivityFromClient);
+            auto now = std::chrono::steady_clock::now();
+            auto duration = std::chrono::duration_cast<std::chrono::seconds>(now - lastActivityFromClient);
 
-    //         if (duration.count() >= 10) {
-    //             send_client_heartbeat(clientSocket, clientAddress);
-    //             lastActivityFromClient = std::chrono::steady_clock::now();
-    //         }
-    //     }
-    // });
+            if (duration.count() >= 7) {
+                send_client_heartbeat(clientSocket, clientAddress);
+                lastActivityFromClient = std::chrono::steady_clock::now();
+            }
+        }
+    });
 
-    // pool.enqueue([&] {
-    //     while (true) {
-    //         std::this_thread::sleep_for(std::chrono::seconds(2));
+    pool.enqueue([&] {
+        while (true) {
+            std::this_thread::sleep_for(std::chrono::seconds(1));
 
-    //         auto now = std::chrono::steady_clock::now();
-    //         auto duration = std::chrono::duration_cast<std::chrono::seconds>(now - lastActivityFromServer);
+            auto now = std::chrono::steady_clock::now();
+            auto duration = std::chrono::duration_cast<std::chrono::seconds>(now - lastActivityFromServer);
 
-    //         if (duration.count() >= 10 && sent_test_req == false) {
-    //             send_client_test_req(clientSocket, clientAddress);
-    //             lastActivityFromClient = std::chrono::steady_clock::now();
-    //             sent_test_req = true;
-    //         } else if (duration.count() >= 10 && sent_test_req ==true) {
-    //             close(clientSocket);
-    //             std::cout << "Server did not respond, closing client..." << std::endl;
-    //             exit(0);
-    //         }
-    //     }
-    // });
+            if (duration.count() >= 7 && sent_test_req == false) {
+                send_client_test_req(clientSocket, clientAddress);
+                lastActivityFromClient = std::chrono::steady_clock::now();
+                sent_test_req = true;
+            } else if (duration.count() >= 7 && sent_test_req ==true) {
+                close(clientSocket);
+                std::cout << "Server did not respond, closing client..." << std::endl;
+                exit(0);
+            }
+        }
+    });
     
     while (true) {
         int nfds = epoll_wait(epollFd, events, 2, -1);

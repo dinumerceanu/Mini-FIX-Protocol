@@ -1,15 +1,7 @@
 #ifndef PARSER_H
 #define PARSER_H
 
-#include <iostream>
-#include <string>
-#include <cstring>
-#include <vector>
-#include <unordered_map>
-#include <optional>
-#include <sstream>
-
-constexpr char SOH = '\x01';
+#include "../headers.h"
 
 extern std::unordered_map<int, std::string> tag_names;
 

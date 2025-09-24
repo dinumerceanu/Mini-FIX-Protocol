@@ -1,13 +1,7 @@
 #ifndef THREAD_POOL_H
 #define THREAD_POOL_H
 
-#include <functional>
-#include <vector>
-#include <thread>
-#include <condition_variable>
-#include <mutex>
-#include <queue>
-#include <future>
+#include "../headers.h"
 
 class ThreadPool {
 public:
