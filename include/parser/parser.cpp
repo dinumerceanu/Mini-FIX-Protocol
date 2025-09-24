@@ -9,6 +9,7 @@ std::unordered_map<int, std::string> tag_names = {
     {34, "MsgSeqNum"},
     {10, "CheckSum"},
     {108, "HeartBtInt"},
+    {112, "TestReqID"},
     // Orders Tags
     {11, "ClOrdID"},        // Order ID
     {21, "HandlInst"},      // HandlInst (e.g., automated)
@@ -69,6 +70,8 @@ std::optional<fix_data> check_parsed_data(fix_data &data) {
         }
     } else if (msgType == "0") {
 
+    } else if (msgType == "1") {
+        //check 112 field is ok
     } else if (msgType == "D") {
         // NewOrderSingle
         std::vector<int> requiredFields = {11, 55, 54, 38, 40};

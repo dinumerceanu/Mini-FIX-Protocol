@@ -41,7 +41,9 @@ struct Client {
     std::string readBuffer;
     std::string writeBuffer;
     bool fix_conn_est;
-    std::chrono::steady_clock::time_point lastActivity;
+    std::chrono::steady_clock::time_point lastActivityFromClient;
+    std::chrono::steady_clock::time_point lastActivityFromServer;
+    bool sent_test_req;
 };
 
 ssize_t send_server_logon(Client &client) {
@@ -92,6 +94,30 @@ ssize_t send_server_heartbeat(Client &client) {
     return send(client.fd, fixHeartbeat.c_str(), fixHeartbeat.size(), 0);
 }
 
+ssize_t send_server_test_req(Client &client) {
+    std::string sender_id_field = "49=";
+    sender_id_field += "127.0.0.1";
+    sender_id_field += ":";
+    sender_id_field += std::to_string(PORT);
+
+    std::string target_id_field = "56=";
+    target_id_field += client.ipStr;
+    target_id_field += ":";
+    target_id_field += std::to_string(client.port);
+
+    std::string fixTestRequest;
+    fixTestRequest += "8=FIX.4.4";  fixTestRequest += '\x01';   // BeginString
+    fixTestRequest += "9=65";       fixTestRequest += '\x01';   // BodyLength (dummy)
+    fixTestRequest += "35=1";       fixTestRequest += '\x01';   // MsgType = TestRequest
+    fixTestRequest += "34=...";     fixTestRequest += '\x01';   // MsgSeqNum (incrementat de tine)
+    fixTestRequest += sender_id_field; fixTestRequest += '\x01'; // SenderCompID
+    fixTestRequest += target_id_field; fixTestRequest += '\x01'; // TargetCompID
+    fixTestRequest += "112=TEST1";  fixTestRequest += '\x01';   // TestReqID (orice string unic)
+    fixTestRequest += "10=123";     fixTestRequest += '\x01';   // CheckSum (dummy)
+
+    return send(client.fd, fixTestRequest.c_str(), fixTestRequest.size(), 0);
+}
+
 int main() {
     try {
         int serverSocket = socket(AF_INET, SOCK_STREAM, 0);
@@ -130,17 +156,44 @@ int main() {
                 auto now = std::chrono::steady_clock::now();
 
                 for (auto &[fd, client] : clients) {
-                    auto duration = std::chrono::duration_cast<std::chrono::seconds>(now - client.lastActivity);
+                    auto duration = std::chrono::duration_cast<std::chrono::seconds>(now - client.lastActivityFromServer);
                     if (duration.count() >= 5) {
-                        // todo: send heartbeat
-
                         send_server_heartbeat(client);
-
-                        client.lastActivity = now;
+                        client.lastActivityFromServer = now;
                     }
                 }
 
-                std::this_thread::sleep_for(std::chrono::seconds(1));
+                std::this_thread::sleep_for(std::chrono::seconds(2));
+            }
+        });
+
+        pool.enqueue([=, &clients] {
+            while (true) {
+                std::vector<int> to_remove;
+
+                auto now = std::chrono::steady_clock::now();
+
+                for (auto &[fd, client] : clients) {
+                    auto duration = std::chrono::duration_cast<std::chrono::seconds>(now - client.lastActivityFromClient);
+                    if (duration.count() >= 10 && client.sent_test_req == false) {
+                        send_server_test_req(client);
+                        client.lastActivityFromServer = now;
+                        client.sent_test_req = true;
+                    } else if (duration.count() >= 10 && client.sent_test_req == true) {
+                        client.fix_conn_est = false;
+                        client.lastActivityFromClient = std::chrono::steady_clock::now();
+                        epoll_ctl(epollFd, EPOLL_CTL_DEL, client.fd, nullptr);
+                        close(client.fd);
+                        printf("Connection terminated with %s:%d (fd=%d) because no response\n", client.ipStr.c_str(), client.port, client.fd);
+                        to_remove.push_back(client.fd);
+                    }
+                }
+                
+                for (int fd : to_remove) {
+                    clients.erase(fd);
+                }
+                
+                std::this_thread::sleep_for(std::chrono::seconds(3));
             }
         });
 
@@ -183,7 +236,7 @@ int main() {
                         clientEvent.data.fd = clientSocket;
 
                         epoll_ctl(epollFd, EPOLL_CTL_ADD, clientSocket, &clientEvent);
-                        clients[clientSocket] = Client{clientSocket, ipStr, clientPort, "", "", false, std::chrono::steady_clock::time_point{}};
+                        clients[clientSocket] = Client{clientSocket, ipStr, clientPort, "", "", false, std::chrono::steady_clock::time_point{}, std::chrono::steady_clock::time_point{}, false};
                     }
                     continue;
                 }
@@ -201,7 +254,7 @@ int main() {
                                 // std::this_thread::sleep_for(std::chrono::seconds(2));
                                 printf("Received from %s:%d (fd=%d): %s\n", clients[fd].ipStr.c_str(), clients[fd].port, fd, msg.c_str());
 
-                                clients[fd].lastActivity = std::chrono::steady_clock::now();
+                                clients[fd].lastActivityFromClient = std::chrono::steady_clock::now();
 
                                 std::string fix_msg = msg;
                                 for (auto &ch : fix_msg) {
@@ -238,7 +291,17 @@ int main() {
                                     } else {
                                         printf("FIX connection established with %s:%d\n", client.ipStr.c_str(), client.port);
                                         client.fix_conn_est = true;
+                                        client.lastActivityFromServer = std::chrono::steady_clock::now();
                                     }
+                                }
+
+                                if (data.fields[35] != "0" && client.sent_test_req == true) {
+                                    client.fix_conn_est = false;
+                                    client.lastActivityFromClient = std::chrono::steady_clock::now();
+                                    epoll_ctl(epollFd, EPOLL_CTL_DEL, client.fd, nullptr);
+                                    close(client.fd);
+                                    clients.erase(client.fd);
+                                    printf("Connection terminated with %s:%d (fd=%d)\n", client.ipStr.c_str(), client.port, client.fd);
                                 }
 
                                 // Client &client = clients[fd];
