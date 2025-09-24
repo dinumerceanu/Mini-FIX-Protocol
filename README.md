@@ -52,7 +52,7 @@ make
 
     Thread pool pattern for scalable request processing
 
-    Strong use of C++17 features: smart pointers, templates, chrono, string streams
+    Modern C++17 memory management with RAII and STL containers
 
     Clean modular design (parser, session_layer, thread_pool, order_execution)
 
