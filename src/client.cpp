@@ -10,11 +10,12 @@
 #include <vector>
 #include <unordered_map>
 #include <arpa/inet.h>
-#include <sstream>
 #include <chrono>
 
 #include "../include/parser/parser.h"
 #include "../include/thread_pool/thread_pool.h"
+
+constexpr int PORT = 9090;
 
 void check(int rc, const char* msg) {
     if (rc < 0) {
@@ -112,7 +113,7 @@ int main() {
 
     sockaddr_in clientAddress{};
     clientAddress.sin_family = AF_INET;
-    clientAddress.sin_port = htons(8080);
+    clientAddress.sin_port = htons(PORT);
     clientAddress.sin_addr.s_addr = INADDR_ANY;
 
     int rc = connect(clientSocket, (struct sockaddr*)&clientAddress, sizeof(clientAddress));
@@ -142,38 +143,38 @@ int main() {
 
     ThreadPool pool{2};
 
-    pool.enqueue([&] {
-        while (true) {
-            std::this_thread::sleep_for(std::chrono::seconds(2));
+    // pool.enqueue([&] {
+    //     while (true) {
+    //         std::this_thread::sleep_for(std::chrono::seconds(2));
 
-            auto now = std::chrono::steady_clock::now();
-            auto duration = std::chrono::duration_cast<std::chrono::seconds>(now - lastActivityFromClient);
+    //         auto now = std::chrono::steady_clock::now();
+    //         auto duration = std::chrono::duration_cast<std::chrono::seconds>(now - lastActivityFromClient);
 
-            if (duration.count() >= 10) {
-                send_client_heartbeat(clientSocket, clientAddress);
-                lastActivityFromClient = std::chrono::steady_clock::now();
-            }
-        }
-    });
+    //         if (duration.count() >= 10) {
+    //             send_client_heartbeat(clientSocket, clientAddress);
+    //             lastActivityFromClient = std::chrono::steady_clock::now();
+    //         }
+    //     }
+    // });
 
-    pool.enqueue([&] {
-        while (true) {
-            std::this_thread::sleep_for(std::chrono::seconds(2));
+    // pool.enqueue([&] {
+    //     while (true) {
+    //         std::this_thread::sleep_for(std::chrono::seconds(2));
 
-            auto now = std::chrono::steady_clock::now();
-            auto duration = std::chrono::duration_cast<std::chrono::seconds>(now - lastActivityFromServer);
+    //         auto now = std::chrono::steady_clock::now();
+    //         auto duration = std::chrono::duration_cast<std::chrono::seconds>(now - lastActivityFromServer);
 
-            if (duration.count() >= 10 && sent_test_req == false) {
-                send_client_test_req(clientSocket, clientAddress);
-                lastActivityFromClient = std::chrono::steady_clock::now();
-                sent_test_req = true;
-            } else if (duration.count() >= 10 && sent_test_req ==true) {
-                close(clientSocket);
-                std::cout << "Server did not respond, closing client..." << std::endl;
-                exit(0);
-            }
-        }
-    });
+    //         if (duration.count() >= 10 && sent_test_req == false) {
+    //             send_client_test_req(clientSocket, clientAddress);
+    //             lastActivityFromClient = std::chrono::steady_clock::now();
+    //             sent_test_req = true;
+    //         } else if (duration.count() >= 10 && sent_test_req ==true) {
+    //             close(clientSocket);
+    //             std::cout << "Server did not respond, closing client..." << std::endl;
+    //             exit(0);
+    //         }
+    //     }
+    // });
     
     while (true) {
         int nfds = epoll_wait(epollFd, events, 2, -1);

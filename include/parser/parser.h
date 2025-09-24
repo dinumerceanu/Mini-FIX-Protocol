@@ -7,6 +7,7 @@
 #include <vector>
 #include <unordered_map>
 #include <optional>
+#include <sstream>
 
 constexpr char SOH = '\x01';
 
@@ -22,5 +23,7 @@ std::pair<int, std::string> parse_field(std::string &string_field);
 std::optional<fix_data> check_parsed_data(fix_data &data);
 
 std::optional<fix_data> parse_fix_message(std::string fixMsg);
+
+std::string fix_to_order_str(fix_data &data, std::string order_id);
 
 #endif

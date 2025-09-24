@@ -11,14 +11,24 @@ std::unordered_map<int, std::string> tag_names = {
     {108, "HeartBtInt"},
     {112, "TestReqID"},
     // Orders Tags
-    {11, "ClOrdID"},        // Order ID
-    {21, "HandlInst"},      // HandlInst (e.g., automated)
-    {55, "Symbol"},         // Sticker
+    {11, "ClOrdID"},        // Order ID (client)
+    {21, "HandlInst"},      // Order handling
+    {55, "Symbol"},         // Symbol
     {54, "Side"},           // Buy/Sell
     {38, "OrderQty"},       // Quantity
-    {40, "OrdType"},        // Order type: 1 = Market, 2 = Limit
-    {44, "Price"},          // Price (only for limit)
-    {59, "TimeInForce"}     // TIP: Day, GTC etc.
+    {40, "OrdType"},        // 1=Market, 2=Limit
+    {44, "Price"},          // Limit price
+    {59, "TimeInForce"},    // Day, GTC etc.
+    // Execution Report specific
+    {37, "OrderID"},        // Server-assigned ID
+    {17, "ExecID"},         // Execution ID (unic per fill)
+    {150, "ExecType"},      // 0=New, 1=Partial, 2=Filled, 4=Canceled etc.
+    {39, "OrdStatus"},      // 0=New, 1=Partially filled, 2=Filled
+    {32, "LastShares"},     // Cantitate executată în fill-ul curent
+    {31, "LastPx"},         // Prețul fill-ului
+    {14, "CumQty"},         // Total executat până acum
+    {151, "LeavesQty"},     // Cantitate rămasă
+    {6, "AvgPx"}            // Preț mediu execuții
 };
 
 std::pair<int, std::string> parse_field(std::string &string_field) {
@@ -72,6 +82,8 @@ std::optional<fix_data> check_parsed_data(fix_data &data) {
 
     } else if (msgType == "1") {
         //check 112 field is ok
+    } else if (msgType == "8") {
+        
     } else if (msgType == "D") {
         // NewOrderSingle
         std::vector<int> requiredFields = {11, 55, 54, 38, 40};
@@ -157,6 +169,35 @@ std::optional<fix_data> parse_fix_message(std::string fixMsg) {
     }
 
     return check_parsed_data(data);
+}
+
+std::string fix_to_order_str(fix_data &data, std::string order_id) {
+    if (data.fields.at(35) != "D") {
+        throw std::invalid_argument("Not a NewOrderSingle message");
+    }
+
+    std::string side;
+    if (data.fields.at(54) == "1") side = "buy";
+    else if (data.fields.at(54) == "2") side = "sell";
+    else throw std::runtime_error("Invalid Side value");
+
+    std::string ordType;
+    if (data.fields.at(40) == "1") ordType = "market";
+    else if (data.fields.at(40) == "2") ordType = "limit";
+    else throw std::runtime_error("Invalid OrdType value");
+
+    std::ostringstream oss;
+    oss << side << " " << ordType << " ";
+
+    if (ordType == "market") {
+        oss << data.fields.at(38);
+    } else if (ordType == "limit") {
+        oss << data.fields.at(44) << " " << data.fields.at(38);
+    }
+
+    oss << " " << order_id << "\n";
+
+    return oss.str();
 }
 
 // int main() {
